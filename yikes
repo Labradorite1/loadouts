@@ -1,0 +1,279 @@
+[Command("loadouts")]
+        public async Task Loadout(string membershipId = "", string membershipType = "", [Remainder] string useless = "")
+        {
+            if (useless != "")
+            {
+                await Context.Channel.SendMessageAsync("This command doesnt require 3 inputs.");
+            }
+
+            ulong requestMembershipType = 0;
+            ulong requestMembershipId = 0;
+
+            if (membershipId == "")
+            {
+                UserAccount account = UserAccounts.GetAccountByUser(Context.User);
+                if (account == null)
+                {
+                    await Context.Channel.SendMessageAsync("You have not registered.");
+                    return;
+                }
+
+                requestMembershipType = account.membershipType;
+                requestMembershipId = account.membershipId;
+            }
+            else
+            {
+                Console.WriteLine(Context.Message.MentionedChannels.Count.ToString());
+                if (Context.Message.MentionedUsers.Count.ToString() != "0")
+                {
+                    UserAccount account = UserAccounts.GetAccountByUser(Context.Message.MentionedUsers.FirstOrDefault());
+                    if (account == null)
+                    {
+                        await Context.Channel.SendMessageAsync("This user has not registered.");
+                        return;
+                    }
+
+                    requestMembershipType = account.membershipType;
+                    requestMembershipId = account.membershipId;
+                }
+                else
+                {
+                    bool parsedSucceedId = ulong.TryParse(membershipId, out ulong parsedMembershipId);
+                    if (!parsedSucceedId)
+                    {
+                        await Context.Channel.SendMessageAsync("Please enter a valid membership Id.");
+                        return;
+                    }
+
+                    if (membershipType == "")
+                    {
+                        if (parsedMembershipId < 76561190000000000 || parsedMembershipId > 76561200000000000)
+                        {
+                            await Context.Channel.SendMessageAsync("Please entr a valid steamId.");
+                            return;
+                        }
+                        else
+                        {
+                            dynamic profile;
+                            using (var client = new HttpClient())
+                            {
+                                client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                                var response = await client.GetAsync($"https://www.bungie.net/Platform/User/GetMembershipFromHardLinkedCredential/SteamId/{parsedMembershipId}/");
+                                var content = await response.Content.ReadAsStringAsync();
+                                profile = Newtonsoft.Json.JsonConvert.DeserializeObject(content);
+                            }
+                            Console.WriteLine(profile);
+
+                            if (profile.ErrorCode != 1)
+                            {
+                                await Context.Channel.SendMessageAsync(profile.Message);
+                                return;
+                            }
+
+                            requestMembershipId = profile.Response.membershipId;
+                            requestMembershipType = profile.Response.membershipType;
+                        }
+                    }
+                    else
+                    {
+                        bool parsedSucceedType = ulong.TryParse(membershipType, out ulong parsedMembershipType);
+                        if (!parsedSucceedType || parsedMembershipType > 5 || parsedMembershipType <= 0)
+                        {
+                            await Context.Channel.SendMessageAsync("Please enter a valid membership Type.");
+                            return;
+                        }
+
+                        requestMembershipId = parsedMembershipId;
+                        requestMembershipType = parsedMembershipType;
+                    }
+                }
+            }
+
+
+            Stopwatch stopwatch = new Stopwatch();
+            GetProfile player;
+            using (var client = new HttpClient())
+            {
+                client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{requestMembershipId}/?components=1000").Result;
+                var content = response.Content.ReadAsStringAsync().Result;
+                player = Newtonsoft.Json.JsonConvert.DeserializeObject<GetProfile>(content);
+                Console.WriteLine("request made to bungie");
+            }
+            if (player.ErrorCode != 1)
+            {
+                await Context.Channel.SendMessageAsync(player.Message);
+            }
+            else if(player.ErrorCode == 1) // if transtitionary is empty send message
+            {
+                if(player.Response.ProfileTransitoryData.Data == null)
+                {
+                    await Context.Channel.SendMessageAsync("Account isn't in an activity");
+                    return;
+                }
+                foreach (DestinyProfileTransitoryPartyMember partyMember in player.Response.ProfileTransitoryData.Data.PartyMembers)
+                {
+                    requestMembershipType = 3;
+                    stopwatch.Reset();
+                    stopwatch.Start();
+                    var embed = new EmbedBuilder();
+                    GetProfile profile = null;
+                    using (var client = new HttpClient())
+                    {
+                        client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                        var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{partyMember.MembershipId}/?components=100,200").Result;
+                        var content = response.Content.ReadAsStringAsync().Result;
+                        profile = Newtonsoft.Json.JsonConvert.DeserializeObject<GetProfile>(content);
+                        Console.WriteLine("request made to bungie");
+                    }
+                    if (profile.ErrorCode != 1)
+                    {
+                        using (var client = new HttpClient())
+                        {
+                            requestMembershipType = 1;
+                            client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                            var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{partyMember.MembershipId}/?components=100,200").Result;
+                            var content = response.Content.ReadAsStringAsync().Result;
+                            profile = Newtonsoft.Json.JsonConvert.DeserializeObject<GetProfile>(content);
+                            Console.WriteLine("profile has been got from bungie api with membership 1");
+                        }
+                        if (profile.ErrorCode != 1)
+                        {
+                            using (var client = new HttpClient())
+                            {
+                                requestMembershipType = 2;
+                                client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                                var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{partyMember.MembershipId}/?components=100,200").Result;
+                                var content = response.Content.ReadAsStringAsync().Result;
+                                profile = Newtonsoft.Json.JsonConvert.DeserializeObject<GetProfile>(content);
+                                Console.WriteLine("profile has been got from bungie api with membership 2");
+                            }
+                            if (profile.ErrorCode != 1)
+                            {
+                                using (var client = new HttpClient())
+                                {
+                                    requestMembershipType = 4;
+                                    client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                                    var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{partyMember.MembershipId}/?components=100").Result;
+                                    var content = response.Content.ReadAsStringAsync().Result;
+                                    profile = Newtonsoft.Json.JsonConvert.DeserializeObject<GetProfile>(content);
+                                    Console.WriteLine("profile has been got from bungie api with membership 4");
+                                }
+                            }
+                        }
+                    }
+                    embed.WithTitle(profile.Response.Profile.Data.UserInfo.DisplayName);
+                    DestinyCharacterComponent character = null;
+                    foreach (long characterId in profile.Response.Profile.Data.CharacterIds)
+                    {
+                        if (profile.Response.Characters.Data.ContainsKey(characterId))
+                        {
+                            character = profile.Response.Characters.Data[characterId];
+                        }
+                        else
+                        {
+                            await Context.Channel.SendMessageAsync("Profile doesn't contain characters...somehow.");
+                            return;
+                        }
+                        if (profile.Response.Profile.Data.DateLastPlayed <= character.DateLastPlayed)
+                        {
+                            GetCharacter selectedCharacter = null;
+                            using (var client = new HttpClient())
+                            {
+                                client.DefaultRequestHeaders.Add("X-API-Key", Config.bot.apiKey);
+                                var response = client.GetAsync($"https://bungie.net/platform/Destiny2/{requestMembershipType}/Profile/{partyMember.MembershipId}/Character/{character.CharacterId}/?components=200,205").Result;
+                                var content = response.Content.ReadAsStringAsync().Result;
+                                selectedCharacter = Newtonsoft.Json.JsonConvert.DeserializeObject<GetCharacter>(content);
+                                Console.WriteLine("request made to bungie");
+                            }
+                            List<string> hashes = new List<string>();
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[11].ItemHash.ToString()); // subclass 
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[0].ItemHash.ToString()); // primary weapon
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[1].ItemHash.ToString()); // secondary weapon
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[2].ItemHash.ToString()); // heavy weapon
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[3].ItemHash.ToString()); // helmet
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[4].ItemHash.ToString()); // gauntlets
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[5].ItemHash.ToString()); // chestpiece
+                            hashes.Add(selectedCharacter.Response.Equipment.Data.Items[6].ItemHash.ToString()); // boots
+                            string subclass = "";
+                            string primary = "";
+                            string secondary = "";
+                            string heavy = "";
+                            string exotic = "";
+                            foreach (string hash in hashes)
+                            {
+                                DestinyInventoryItemDefinition definition = Hashes.GetItemDefiniton(hash);
+                                if (definition.ItemTypeDisplayName == "Helmet" && definition.ItemTypeAndTierDisplayName != "Exotic Helmet")
+                                {
+
+                                }
+                                else if (definition.ItemTypeDisplayName == "Gauntlets" && definition.ItemTypeAndTierDisplayName != "Exotic Gauntlets")
+                                {
+
+                                }
+                                else if (definition.ItemTypeDisplayName == "Chest Armor" && definition.ItemTypeAndTierDisplayName != "Exotic Chest Armor")
+                                {
+
+                                }
+                                else if (definition.ItemTypeDisplayName == "Leg Armor" && definition.ItemTypeAndTierDisplayName != "Exotic Leg Armor")
+                                {
+
+                                }
+                                else
+                                {
+                                    if (hash == hashes[0])
+                                    {
+                                        subclass = $"https://www.bungie.net{definition.DisplayProperties.Icon}";
+                                    }
+                                    else if (hash == hashes[1])
+                                    {
+                                        primary = $"https://www.bungie.net{definition.DisplayProperties.Icon}";
+                                    }
+                                    else if (hash == hashes[2])
+                                    {
+                                        secondary = $"https://www.bungie.net{definition.DisplayProperties.Icon}";
+                                    }
+                                    else if (hash == hashes[3])
+                                    {
+                                        heavy = $"https://www.bungie.net{definition.DisplayProperties.Icon}";
+                                    }
+                                    else
+                                    {
+                                        exotic = $"https://www.bungie.net{definition.DisplayProperties.Icon}";
+                                    }
+                                    embed.AddField(definition.ItemTypeDisplayName.ToString(), definition.DisplayProperties.Name, true);
+                                }
+                            }
+                            WebClient wc = new WebClient();
+                            byte[] subclassBytes = wc.DownloadData(subclass);
+                            byte[] primaryBytes = wc.DownloadData(primary);
+                            byte[] secondaryBytes = wc.DownloadData(secondary);
+                            byte[] heavyBytes = wc.DownloadData(heavy);
+                            MemoryStream subclassMs = new MemoryStream(subclassBytes);
+                            MemoryStream primaryMs = new MemoryStream(primaryBytes);
+                            MemoryStream secondaryMs = new MemoryStream(secondaryBytes);
+                            MemoryStream heavyMs = new MemoryStream(heavyBytes);
+                            System.Drawing.Image img = new Bitmap(644, 160);
+                            Graphics g = Graphics.FromImage(img);
+                            g.DrawImage(System.Drawing.Image.FromStream(subclassMs), new Point(0, 0));
+                            g.DrawImage(System.Drawing.Image.FromStream(primaryMs), new Point(180, 32));
+                            g.DrawImage(System.Drawing.Image.FromStream(secondaryMs), new Point(296, 32));
+                            g.DrawImage(System.Drawing.Image.FromStream(heavyMs), new Point(412, 32));
+                            if (exotic != "")
+                            {
+                                byte[] exoticBytes = wc.DownloadData(exotic);
+                                MemoryStream exoticMs = new MemoryStream(exoticBytes);
+                                g.DrawImage(System.Drawing.Image.FromStream(exoticMs), new Point(528, 32));
+                            }
+                            img.Save("output.png");
+                            Console.WriteLine("hashes have been defined");
+                            embed.ImageUrl = $"attachment://output.png"; //("Images/output.png");
+                            await Context.Channel.SendFileAsync("output.png", embed: embed.Build());
+                            Console.WriteLine("message has been sent");
+                            stopwatch.Stop();
+                            //await Context.Channel.SendMessageAsync($"request took: {stopwatch.Elapsed} seconds");
+                        }
+                    }
+                }
+            }
+        }
